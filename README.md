@@ -6,7 +6,6 @@
 
 ![Semiconductor Device Modeling](images/fig1.png)
 
-### 🌐 Live project page → **https://selsaady1.github.io/eee533-semiconductor-devices/**
 
 ## Overview
 Graduate coursework for EEE 533 (Semiconductor Device and Process Simulation, ASU, Fall 2025) spanning hand-coded numerical solvers and commercial TCAD. The work moves from quantum band-structure and carrier-statistics calculations in Python, through custom 1D Poisson and drift-diffusion PN-junction solvers in MATLAB, to Silvaco Victory/ATLAS device simulations of MOSFETs, SOI transistors, MOS capacitors, and MESFETs/HEMTs. It culminates in an IEEE-style paper on gate leakage and high-k dielectric scaling.
@@ -79,9 +78,3 @@ Deliverables include working solvers, eight Silvaco TCAD decks, and written repo
 
 ## Deliverable
 See [`docs/EEE533_FinalProject.pdf`](docs/EEE533_FinalProject.pdf).
-
-## License
-MIT — see [`LICENSE`](LICENSE).
-
----
-_Part of [Saif Elsaady's engineering portfolio](https://selsaady1.github.io/portfolio/). Deliverables only — routine homework/quizzes/exams excluded._
