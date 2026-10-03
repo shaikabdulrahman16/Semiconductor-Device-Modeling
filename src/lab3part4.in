@@ -1,0 +1,427 @@
+# Enhanced SOI MOSFET Relaxation Time Parametric Study - Lab 3 Part 4
+# Comprehensive analysis of energy and momentum relaxation time effects
+# Investigating impact of tau on carrier transport and device performance
+
+go victorydevice
+
+############################################################
+#############  Device Configuration Parameters  ############
+############################################################
+
+# Global mesh control
+mesh space.mult=10
+
+# Device Geometry (180nm channel)
+set sd_length = 0.025
+set channel_length = 0.180
+set gate_oxide = -0.0016
+set si_film = 0.020
+set BOX_oxide = 0.080
+
+# Doping Concentrations
+set sd_doping = 1e20
+set channel_doping = 1e18
+
+# Voltage Parameters
+set Vmax = 1.5
+set Vgate_step = 0.01
+set Vdrain_fine_step = 0.001
+set Vdrain_coarse_step = 0.01
+set Vdrain_transition = 0.01
+
+# Relaxation Time Parameters for Parametric Study
+set tau_shortest = 0.15e-12   # Shortest relaxation time
+set tau_short = 0.2e-12        # Short relaxation time
+set tau_medium = 0.25e-12      # Medium relaxation time
+set tau_long = 0.3e-12         # Long relaxation time
+set tau_longest = 0.35e-12     # Longest relaxation time
+
+############################################################
+#############  Enhanced Mesh Generation  ###################
+############################################################
+
+# X-direction mesh with refined channel region
+x.mesh loc=0.00    spac=0.005
+x.mesh loc=$sd_length/2   spac=0.002
+x.mesh loc=$sd_length   spac=0.0002
+x.mesh loc=$sd_length + $channel_length/4   spac=0.0008
+x.mesh loc=$sd_length + $channel_length/2   spac=0.0008
+x.mesh loc=$sd_length + 3*$channel_length/4   spac=0.0008
+x.mesh loc=$sd_length + $channel_length   spac=0.0002
+x.mesh loc=$sd_length + $channel_length + $sd_length/2   spac=0.002
+x.mesh loc=2*$sd_length + $channel_length    spac=0.005
+
+# Y-direction mesh with fine resolution at interfaces
+y.mesh loc=$gate_oxide  spac=0.00008
+y.mesh loc=$gate_oxide/2  spac=0.00009
+y.mesh loc=0.00    spac=0.00008
+y.mesh loc=$si_film/3  spac=0.0005
+y.mesh loc=2*$si_film/3  spac=0.0008
+y.mesh loc=$si_film    spac=0.0008
+y.mesh loc=$si_film + $BOX_oxide/2  spac=0.003
+y.mesh loc=$si_film + $BOX_oxide    spac=0.005
+
+############################################################
+#############  Region and Material Definition  #############
+############################################################
+
+# Top gate oxide
+region num=1 y.max=0 oxide
+
+# Silicon film (active device layer)
+region num=2 y.min=0 y.max=$si_film silicon
+
+# Buried oxide (BOX)
+region num=3 y.min=$si_film oxide
+
+############################################################
+#############  Electrode Definitions  ######################
+############################################################
+
+electrode name=gate   x.min=$sd_length x.max=$sd_length+$channel_length y.min=$gate_oxide y.max=$gate_oxide
+electrode name=source x.max=$sd_length y.min=0 y.max=0
+electrode name=drain  x.min=$sd_length+$channel_length y.min=0 y.max=0
+electrode name=substrate bottom
+
+############################################################
+#############  Doping Profile  #############################
+############################################################
+
+# N+ source region (heavily doped)
+doping uniform conc=$sd_doping n.type x.min=0 x.max=$sd_length y.min=0 y.max=$si_film
+
+# N+ drain region (heavily doped)
+doping uniform conc=$sd_doping n.type x.min=$sd_length+$channel_length y.min=0 y.max=$si_film
+
+# P-type channel region
+doping uniform conc=$channel_doping p.type x.min=$sd_length x.max=$sd_length+$channel_length y.min=0 y.max=$si_film
+
+############################################################
+#############  Contact Configuration  ######################
+############################################################
+
+# Set gate work function
+contact name=gate aluminum
+
+# Save initial structure
+save outfile=soi_tau_study_structure.str
+victoryvisual soi_tau_study_structure.str
+
+######################################################################
+##############  (1) Tau = 0.15 ps (Shortest Relaxation)  #############
+######################################################################
+
+# Set relaxation parameters
+material silicon taurel.el=$tau_shortest taumob.el=$tau_shortest
+
+# Physical models
+models cvt srh auger fldmob conmob hcte print
+
+# Numerical method
+method newton trap maxtraps=12 climit=1e-5
+
+# Output specifications
+output e.velocity ex.velocity ey.velocity e.temp e.field potential charge
+
+# Initialize device
+solve init
+solve prev
+
+# Set initial gate bias
+solve vgate=0 vstep=$Vgate_step name=gate vfinal=$Vmax
+
+# Output characteristics
+log outf=tau_015ps_output.log
+solve vdrain=0.0 vstep=$Vdrain_fine_step name=drain vfinal=$Vdrain_transition
+solve vdrain=$Vdrain_transition vstep=$Vdrain_coarse_step name=drain vfinal=$Vmax
+save outf=tau_015ps_final.str
+log off
+
+# Extract parameters
+extract init infile="tau_015ps_output.log"
+extract name="Id_sat_015" y.val from curve(v."drain",abs(i."drain")) where x.val=$Vmax
+extract name="gm_015" max(deriv(curve(v."gate",i."drain")))
+extract name="gds_015" max(deriv(curve(v."drain",i."drain")))
+extract name="max_evel_015" max(e.velocity)
+extract name="max_etemp_015" max(e.temp)
+extract name="Ron_015" $Vmax/$Id_sat_015
+
+# Transfer characteristics
+solve init
+solve vdrain=$Vmax
+
+log outf=tau_015ps_transfer.log
+solve vgate=0.0 vstep=$Vgate_step vfinal=$Vmax name=gate
+save outf=tau_015ps_transfer_final.str
+log off
+
+extract init infile="tau_015ps_transfer.log"
+extract name="vt_015" xintercept(maxslope(curve(v."gate",i."drain"))) - ave(v."drain")/2.0
+extract name="subvt_015" 1.0/slope(maxslope(curve(v."gate",log10(i."drain"))))
+
+######################################################################
+##############  (2) Tau = 0.2 ps (Short Relaxation)  #################
+######################################################################
+
+# Set relaxation parameters
+material silicon taurel.el=$tau_short taumob.el=$tau_short
+
+# Physical models
+models cvt srh auger fldmob conmob hcte print
+
+# Numerical method
+method newton trap maxtraps=12 climit=1e-5
+
+# Output specifications
+output e.velocity ex.velocity ey.velocity e.temp e.field potential charge
+
+# Initialize device
+solve init
+solve prev
+
+# Set initial gate bias
+solve vgate=0 vstep=$Vgate_step name=gate vfinal=$Vmax
+
+# Output characteristics
+log outf=tau_020ps_output.log
+solve vdrain=0.0 vstep=$Vdrain_fine_step name=drain vfinal=$Vdrain_transition
+solve vdrain=$Vdrain_transition vstep=$Vdrain_coarse_step name=drain vfinal=$Vmax
+save outf=tau_020ps_final.str
+log off
+
+# Extract parameters
+extract init infile="tau_020ps_output.log"
+extract name="Id_sat_020" y.val from curve(v."drain",abs(i."drain")) where x.val=$Vmax
+extract name="gm_020" max(deriv(curve(v."gate",i."drain")))
+extract name="gds_020" max(deriv(curve(v."drain",i."drain")))
+extract name="max_evel_020" max(e.velocity)
+extract name="max_etemp_020" max(e.temp)
+extract name="Ron_020" $Vmax/$Id_sat_020
+
+# Transfer characteristics
+solve init
+solve vdrain=$Vmax
+
+log outf=tau_020ps_transfer.log
+solve vgate=0.0 vstep=$Vgate_step vfinal=$Vmax name=gate
+save outf=tau_020ps_transfer_final.str
+log off
+
+extract init infile="tau_020ps_transfer.log"
+extract name="vt_020" xintercept(maxslope(curve(v."gate",i."drain"))) - ave(v."drain")/2.0
+extract name="subvt_020" 1.0/slope(maxslope(curve(v."gate",log10(i."drain"))))
+
+######################################################################
+##############  (3) Tau = 0.25 ps (Medium Relaxation)  ###############
+######################################################################
+
+# Set relaxation parameters
+material silicon taurel.el=$tau_medium taumob.el=$tau_medium
+
+# Physical models
+models cvt srh auger fldmob conmob hcte print
+
+# Numerical method
+method newton trap maxtraps=12 climit=1e-5
+
+# Output specifications
+output e.velocity ex.velocity ey.velocity e.temp e.field potential charge
+
+# Initialize device
+solve init
+solve prev
+
+# Set initial gate bias
+solve vgate=0 vstep=$Vgate_step name=gate vfinal=$Vmax
+
+# Output characteristics
+log outf=tau_025ps_output.log
+solve vdrain=0.0 vstep=$Vdrain_fine_step name=drain vfinal=$Vdrain_transition
+solve vdrain=$Vdrain_transition vstep=$Vdrain_coarse_step name=drain vfinal=$Vmax
+save outf=tau_025ps_final.str
+log off
+
+# Extract parameters
+extract init infile="tau_025ps_output.log"
+extract name="Id_sat_025" y.val from curve(v."drain",abs(i."drain")) where x.val=$Vmax
+extract name="gm_025" max(deriv(curve(v."gate",i."drain")))
+extract name="gds_025" max(deriv(curve(v."drain",i."drain")))
+extract name="max_evel_025" max(e.velocity)
+extract name="max_etemp_025" max(e.temp)
+extract name="Ron_025" $Vmax/$Id_sat_025
+
+# Transfer characteristics
+solve init
+solve vdrain=$Vmax
+
+log outf=tau_025ps_transfer.log
+solve vgate=0.0 vstep=$Vgate_step vfinal=$Vmax name=gate
+save outf=tau_025ps_transfer_final.str
+log off
+
+extract init infile="tau_025ps_transfer.log"
+extract name="vt_025" xintercept(maxslope(curve(v."gate",i."drain"))) - ave(v."drain")/2.0
+extract name="subvt_025" 1.0/slope(maxslope(curve(v."gate",log10(i."drain"))))
+
+######################################################################
+##############  (4) Tau = 0.3 ps (Long Relaxation)  ##################
+######################################################################
+
+# Set relaxation parameters
+material silicon taurel.el=$tau_long taumob.el=$tau_long
+
+# Physical models
+models cvt srh auger fldmob conmob hcte print
+
+# Numerical method
+method newton trap maxtraps=12 climit=1e-5
+
+# Output specifications
+output e.velocity ex.velocity ey.velocity e.temp e.field potential charge
+
+# Initialize device
+solve init
+solve prev
+
+# Set initial gate bias
+solve vgate=0 vstep=$Vgate_step name=gate vfinal=$Vmax
+
+# Output characteristics
+log outf=tau_030ps_output.log
+solve vdrain=0.0 vstep=$Vdrain_fine_step name=drain vfinal=$Vdrain_transition
+solve vdrain=$Vdrain_transition vstep=$Vdrain_coarse_step name=drain vfinal=$Vmax
+save outf=tau_030ps_final.str
+log off
+
+# Extract parameters
+extract init infile="tau_030ps_output.log"
+extract name="Id_sat_030" y.val from curve(v."drain",abs(i."drain")) where x.val=$Vmax
+extract name="gm_030" max(deriv(curve(v."gate",i."drain")))
+extract name="gds_030" max(deriv(curve(v."drain",i."drain")))
+extract name="max_evel_030" max(e.velocity)
+extract name="max_etemp_030" max(e.temp)
+extract name="Ron_030" $Vmax/$Id_sat_030
+
+# Transfer characteristics
+solve init
+solve vdrain=$Vmax
+
+log outf=tau_030ps_transfer.log
+solve vgate=0.0 vstep=$Vgate_step vfinal=$Vmax name=gate
+save outf=tau_030ps_transfer_final.str
+log off
+
+extract init infile="tau_030ps_transfer.log"
+extract name="vt_030" xintercept(maxslope(curve(v."gate",i."drain"))) - ave(v."drain")/2.0
+extract name="subvt_030" 1.0/slope(maxslope(curve(v."gate",log10(i."drain"))))
+
+######################################################################
+##############  (5) Tau = 0.35 ps (Longest Relaxation)  ##############
+######################################################################
+
+# Set relaxation parameters
+material silicon taurel.el=$tau_longest taumob.el=$tau_longest
+
+# Physical models
+models cvt srh auger fldmob conmob hcte print
+
+# Numerical method
+method newton trap maxtraps=12 climit=1e-5
+
+# Output specifications
+output e.velocity ex.velocity ey.velocity e.temp e.field potential charge
+
+# Initialize device
+solve init
+solve prev
+
+# Set initial gate bias
+solve vgate=0 vstep=$Vgate_step name=gate vfinal=$Vmax
+
+# Output characteristics
+log outf=tau_035ps_output.log
+solve vdrain=0.0 vstep=$Vdrain_fine_step name=drain vfinal=$Vdrain_transition
+solve vdrain=$Vdrain_transition vstep=$Vdrain_coarse_step name=drain vfinal=$Vmax
+save outf=tau_035ps_final.str
+log off
+
+# Extract parameters
+extract init infile="tau_035ps_output.log"
+extract name="Id_sat_035" y.val from curve(v."drain",abs(i."drain")) where x.val=$Vmax
+extract name="gm_035" max(deriv(curve(v."gate",i."drain")))
+extract name="gds_035" max(deriv(curve(v."drain",i."drain")))
+extract name="max_evel_035" max(e.velocity)
+extract name="max_etemp_035" max(e.temp)
+extract name="Ron_035" $Vmax/$Id_sat_035
+
+# Transfer characteristics
+solve init
+solve vdrain=$Vmax
+
+log outf=tau_035ps_transfer.log
+solve vgate=0.0 vstep=$Vgate_step vfinal=$Vmax name=gate
+save outf=tau_035ps_transfer_final.str
+log off
+
+extract init infile="tau_035ps_transfer.log"
+extract name="vt_035" xintercept(maxslope(curve(v."gate",i."drain"))) - ave(v."drain")/2.0
+extract name="subvt_035" 1.0/slope(maxslope(curve(v."gate",log10(i."drain"))))
+
+######################################################################
+##############  (6) Comparative Analysis of Tau Effects  #############
+######################################################################
+
+# Current variation with tau
+extract name="Id_range" $Id_sat_035 - $Id_sat_015
+extract name="Id_variation_percent" 100.0*abs($Id_sat_035 - $Id_sat_015)/$Id_sat_020
+
+# Velocity variation with tau
+extract name="vel_range" $max_evel_035 - $max_evel_015
+extract name="vel_variation_percent" 100.0*abs($max_evel_035 - $max_evel_015)/$max_evel_020
+
+# Temperature variation with tau
+extract name="temp_range" $max_etemp_035 - $max_etemp_015
+extract name="temp_variation_percent" 100.0*abs($max_etemp_035 - $max_etemp_015)/$max_etemp_020
+
+# Threshold voltage variation with tau
+extract name="vt_range" $vt_035 - $vt_015
+extract name="vt_sensitivity" abs($vt_range)/($tau_longest - $tau_shortest)
+
+# Transconductance variation with tau
+extract name="gm_range" $gm_035 - $gm_015
+extract name="gm_variation_percent" 100.0*abs($gm_035 - $gm_015)/$gm_020
+
+# On-resistance variation with tau
+extract name="Ron_range" $Ron_035 - $Ron_015
+extract name="Ron_variation_percent" 100.0*abs($Ron_035 - $Ron_015)/$Ron_020
+
+# Pairwise comparisons (adjacent tau values)
+extract name="Id_diff_015_020" 100.0*abs($Id_sat_020 - $Id_sat_015)/$Id_sat_015
+extract name="Id_diff_020_025" 100.0*abs($Id_sat_025 - $Id_sat_020)/$Id_sat_020
+extract name="Id_diff_025_030" 100.0*abs($Id_sat_030 - $Id_sat_025)/$Id_sat_025
+extract name="Id_diff_030_035" 100.0*abs($Id_sat_035 - $Id_sat_030)/$Id_sat_030
+
+# Device performance metrics
+extract name="channel_length_nm" $channel_length*1000.0
+extract name="si_film_thickness_nm" $si_film*1000.0
+extract name="gate_oxide_thickness_nm" abs($gate_oxide)*1000.0
+
+# Optimal tau determination (based on maximum current)
+extract name="tau_for_max_current" $tau_shortest
+
+######################################################################
+##############  (7) Visualization and Output  ########################
+######################################################################
+
+# Overlay all output characteristics
+victoryvisual --overlay tau_015ps_output.log tau_020ps_output.log tau_025ps_output.log tau_030ps_output.log tau_035ps_output.log
+
+# Overlay all transfer characteristics
+victoryvisual --overlay tau_015ps_transfer.log tau_020ps_transfer.log tau_025ps_transfer.log tau_030ps_transfer.log tau_035ps_transfer.log
+
+# Pairwise comparisons for detailed analysis
+victoryvisual --overlay tau_020ps_output.log tau_025ps_output.log -color1=blue -color2=red
+victoryvisual --overlay tau_025ps_output.log tau_030ps_output.log -color1=blue -color2=red
+
+quit
+

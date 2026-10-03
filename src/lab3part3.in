@@ -1,0 +1,364 @@
+# Enhanced SOI MOSFET Self-Heating Analysis - Lab 3 Part 3
+# Comprehensive comparison of device performance with and without self-heating effects
+# Focus on thermal effects in energy-balance transport model
+
+go victorydevice
+
+############################################################
+#############  Device Configuration Parameters  ############
+############################################################
+
+# Global mesh control - coarser for larger device
+mesh space.mult=10
+
+# Device Geometry (180nm channel - larger for thermal effects)
+set sd_length = 0.025
+set channel_length = 0.180
+set gate_oxide = -0.0016
+set si_film = 0.020
+set BOX_oxide = 0.080
+
+# Alternative channel lengths for parametric study
+set channel_length_short = 0.100
+set channel_length_long = 0.180
+
+# Doping Concentrations
+set sd_doping = 1e20
+set channel_doping = 1e18
+set channel_doping_low = 5e17
+set channel_doping_high = 2e18
+
+# Transport Model Parameters
+set tau_energy = 0.2e-12      # Energy relaxation time
+set tau_momentum = 0.2e-12    # Momentum relaxation time
+
+# Voltage Parameters
+set Vmax = 1.5
+set Vgate_step = 0.01
+set Vdrain_fine_step = 0.001
+set Vdrain_coarse_step = 0.01
+set Vdrain_transition = 0.01
+
+# Thermal Parameters
+set ambient_temp = 300        # Ambient temperature in Kelvin
+set substrate_temp = 300      # Substrate temperature
+
+############################################################
+#############  Enhanced Mesh Generation  ###################
+############################################################
+
+# X-direction mesh with refined channel region
+x.mesh loc=0.00    spac=0.005
+x.mesh loc=$sd_length/2   spac=0.002
+x.mesh loc=$sd_length   spac=0.0002
+x.mesh loc=$sd_length + $channel_length/4   spac=0.0008
+x.mesh loc=$sd_length + $channel_length/2   spac=0.0008
+x.mesh loc=$sd_length + 3*$channel_length/4   spac=0.0008
+x.mesh loc=$sd_length + $channel_length   spac=0.0002
+x.mesh loc=$sd_length + $channel_length + $sd_length/2   spac=0.002
+x.mesh loc=2*$sd_length + $channel_length    spac=0.005
+
+# Y-direction mesh with fine resolution at interfaces
+y.mesh loc=$gate_oxide  spac=0.00008
+y.mesh loc=$gate_oxide/2  spac=0.00009
+y.mesh loc=0.00    spac=0.00008
+y.mesh loc=$si_film/3  spac=0.0005
+y.mesh loc=2*$si_film/3  spac=0.0008
+y.mesh loc=$si_film    spac=0.0008
+y.mesh loc=$si_film + $BOX_oxide/3  spac=0.003
+y.mesh loc=$si_film + 2*$BOX_oxide/3  spac=0.004
+y.mesh loc=$si_film + $BOX_oxide    spac=0.005
+
+############################################################
+#############  Region and Material Definition  #############
+############################################################
+
+# Top gate oxide
+region num=1 y.max=0 oxide
+
+# Silicon film (active device layer)
+region num=2 y.min=0 y.max=$si_film silicon
+
+# Buried oxide (BOX) - critical for thermal isolation
+region num=3 y.min=$si_film oxide
+
+############################################################
+#############  Electrode Definitions  ######################
+############################################################
+
+electrode name=gate   x.min=$sd_length x.max=$sd_length+$channel_length y.min=$gate_oxide y.max=$gate_oxide
+electrode name=source x.max=$sd_length y.min=0 y.max=0
+electrode name=drain  x.min=$sd_length+$channel_length y.min=0 y.max=0
+electrode name=substrate bottom
+
+############################################################
+#############  Doping Profile  #############################
+############################################################
+
+# N+ source region (heavily doped)
+doping uniform conc=$sd_doping n.type x.min=0 x.max=$sd_length y.min=0 y.max=$si_film
+
+# N+ drain region (heavily doped)
+doping uniform conc=$sd_doping n.type x.min=$sd_length+$channel_length y.min=0 y.max=$si_film
+
+# P-type channel region
+doping uniform conc=$channel_doping p.type x.min=$sd_length x.max=$sd_length+$channel_length y.min=0 y.max=$si_film
+
+############################################################
+#############  Contact Configuration  ######################
+############################################################
+
+# Set gate work function
+contact name=gate aluminum
+
+# Save initial structure
+save outfile=soi_thermal_structure.str
+victoryvisual soi_thermal_structure.str
+
+######################################################################
+##############  (1) Energy Balance WITHOUT Self-Heating  #############
+#  Isothermal simulation - lattice temperature fixed at ambient
+######################################################################
+
+# Set energy relaxation parameters
+material silicon taurel.el=$tau_energy taumob.el=$tau_momentum
+
+# Physical models - energy balance without lattice heating
+models cvt srh auger fldmob conmob hcte print
+
+# Numerical method
+method newton trap maxtraps=12 climit=1e-5
+
+# Output specifications - include electron temperature
+output e.velocity ex.velocity ey.velocity e.temp e.field potential charge
+
+# Initialize device
+solve init
+solve prev
+
+# Set initial gate bias
+solve vgate=0 vstep=$Vgate_step name=gate vfinal=$Vmax
+
+# ID-VD characteristics without self-heating
+log outf=no_selfheating_IDVD.log
+solve vdrain=0.0 vstep=$Vdrain_fine_step name=drain vfinal=$Vdrain_transition
+solve vdrain=$Vdrain_transition vstep=$Vdrain_coarse_step name=drain vfinal=$Vmax
+save outf=no_selfheating_final.str
+log off
+
+# Extract parameters without self-heating
+extract init infile="no_selfheating_IDVD.log"
+extract name="Id_sat_nosh" y.val from curve(v."drain",abs(i."drain")) where x.val=$Vmax
+extract name="gm_nosh" max(deriv(curve(v."gate",i."drain")))
+extract name="gds_nosh" max(deriv(curve(v."drain",i."drain")))
+extract name="max_evel_nosh" max(e.velocity)
+extract name="max_etemp_nosh" max(e.temp)
+extract name="Ron_nosh" $Vmax/$Id_sat_nosh
+
+# Power dissipation calculation
+extract name="power_nosh" $Vmax*$Id_sat_nosh
+
+# Temperature profile at high bias
+solve init
+solve vgate=$Vmax vstep=$Vgate_step name=gate vfinal=$Vmax
+solve vdrain=$Vmax vstep=$Vdrain_coarse_step name=drain vfinal=$Vmax
+log outf=no_selfheating_temp_profile.log
+save outf=no_selfheating_highbias.str
+log off
+
+######################################################################
+##############  (2) Energy Balance WITH Self-Heating  ################
+#  Self-consistent thermal simulation - coupled electro-thermal
+######################################################################
+
+# Reset and configure for self-heating simulation
+go victorydevice
+mesh inf=soi_thermal_structure.str
+
+# Contact configuration
+contact name=gate aluminum
+
+# Set energy relaxation parameters
+material silicon taurel.el=$tau_energy taumob.el=$tau_momentum
+
+# Physical models - energy balance WITH lattice heating
+models cvt srh auger fldmob conmob hcte lat.temp print
+
+# Define thermal boundary condition at substrate
+thermcontact num=1 name=substrate temp=$substrate_temp
+
+# Numerical method with tighter convergence for coupled solution
+method newton trap maxtraps=15 climit=1e-6
+
+# Output specifications - include lattice temperature
+output e.velocity ex.velocity ey.velocity e.temp l.temp e.field potential charge h.conduction j.total
+
+# Initialize device
+solve init
+solve prev
+
+# Set initial gate bias
+solve vgate=0 vstep=$Vgate_step name=gate vfinal=$Vmax
+
+# ID-VD characteristics with self-heating
+log outf=with_selfheating_IDVD.log
+solve vdrain=0.0 vstep=$Vdrain_fine_step name=drain vfinal=$Vdrain_transition
+solve vdrain=$Vdrain_transition vstep=$Vdrain_coarse_step name=drain vfinal=$Vmax
+save outf=with_selfheating_final.str
+log off
+
+# Extract parameters with self-heating
+extract init infile="with_selfheating_IDVD.log"
+extract name="Id_sat_sh" y.val from curve(v."drain",abs(i."drain")) where x.val=$Vmax
+extract name="gm_sh" max(deriv(curve(v."gate",i."drain")))
+extract name="gds_sh" max(deriv(curve(v."drain",i."drain")))
+extract name="max_evel_sh" max(e.velocity)
+extract name="max_etemp_sh" max(e.temp)
+extract name="max_ltemp_sh" max(l.temp)
+extract name="Ron_sh" $Vmax/$Id_sat_sh
+
+# Power dissipation calculation
+extract name="power_sh" $Vmax*$Id_sat_sh
+
+# Temperature rise calculation
+extract name="delta_temp" $max_ltemp_sh - $substrate_temp
+extract name="thermal_resistance" $delta_temp/$power_sh
+
+# Temperature profile at high bias
+solve init
+solve vgate=$Vmax vstep=$Vgate_step name=gate vfinal=$Vmax
+solve vdrain=$Vmax vstep=$Vdrain_coarse_step name=drain vfinal=$Vmax
+log outf=with_selfheating_temp_profile.log
+save outf=with_selfheating_highbias.str
+log off
+
+######################################################################
+##############  (3) Transfer Characteristics Comparison  #############
+######################################################################
+
+# Transfer curve WITHOUT self-heating
+go victorydevice
+mesh inf=soi_thermal_structure.str
+contact name=gate aluminum
+
+material silicon taurel.el=$tau_energy taumob.el=$tau_momentum
+models cvt srh auger fldmob conmob hcte print
+method newton trap maxtraps=12
+
+solve init
+solve vdrain=$Vmax
+
+log outf=no_selfheating_transfer.log
+solve vgate=0.0 vstep=$Vgate_step vfinal=$Vmax name=gate
+save outf=no_selfheating_transfer_final.str
+log off
+
+# Extract threshold voltage without self-heating
+extract init infile="no_selfheating_transfer.log"
+extract name="vt_nosh" xintercept(maxslope(curve(v."gate",i."drain"))) - ave(v."drain")/2.0
+extract name="subvt_nosh" 1.0/slope(maxslope(curve(v."gate",log10(i."drain"))))
+extract name="Ion_nosh" y.val from curve(v."gate",abs(i."drain")) where x.val=$Vmax
+extract name="Ioff_nosh" y.val from curve(v."gate",abs(i."drain")) where x.val=0.0
+extract name="Ion_Ioff_nosh" $Ion_nosh/$Ioff_nosh
+
+# Transfer curve WITH self-heating
+go victorydevice
+mesh inf=soi_thermal_structure.str
+contact name=gate aluminum
+
+material silicon taurel.el=$tau_energy taumob.el=$tau_momentum
+models cvt srh auger fldmob conmob hcte lat.temp print
+thermcontact num=1 name=substrate temp=$substrate_temp
+method newton trap maxtraps=15
+
+solve init
+solve vdrain=$Vmax
+
+log outf=with_selfheating_transfer.log
+solve vgate=0.0 vstep=$Vgate_step vfinal=$Vmax name=gate
+save outf=with_selfheating_transfer_final.str
+log off
+
+# Extract threshold voltage with self-heating
+extract init infile="with_selfheating_transfer.log"
+extract name="vt_sh" xintercept(maxslope(curve(v."gate",i."drain"))) - ave(v."drain")/2.0
+extract name="subvt_sh" 1.0/slope(maxslope(curve(v."gate",log10(i."drain"))))
+extract name="Ion_sh" y.val from curve(v."gate",abs(i."drain")) where x.val=$Vmax
+extract name="Ioff_sh" y.val from curve(v."gate",abs(i."drain")) where x.val=0.0
+extract name="Ion_Ioff_sh" $Ion_sh/$Ioff_sh
+
+######################################################################
+##############  (4) Multi-Bias Thermal Characterization  #############
+######################################################################
+
+# Thermal resistance extraction at multiple power levels
+go victorydevice
+mesh inf=soi_thermal_structure.str
+contact name=gate aluminum
+
+material silicon taurel.el=$tau_energy taumob.el=$tau_momentum
+models cvt srh auger fldmob conmob hcte lat.temp print
+thermcontact num=1 name=substrate temp=$substrate_temp
+method newton trap maxtraps=15
+
+log outf=thermal_resistance_sweep.log
+
+solve init
+solve vgate=$Vmax
+
+# Sweep multiple drain voltages to characterize thermal behavior
+solve vdrain=0.3*$Vmax
+solve vdrain=0.5*$Vmax
+solve vdrain=0.7*$Vmax
+solve vdrain=0.9*$Vmax
+solve vdrain=$Vmax
+
+log off
+save outf=thermal_characterization.str
+
+######################################################################
+##############  (5) Comparative Analysis and Metrics  ################
+######################################################################
+
+# Current degradation due to self-heating
+extract name="current_reduction_percent" 100.0*abs($Id_sat_nosh - $Id_sat_sh)/$Id_sat_nosh
+
+# Mobility degradation indicator
+extract name="mobility_degradation_percent" 100.0*abs($gm_nosh - $gm_sh)/$gm_nosh
+
+# Resistance increase
+extract name="Ron_increase_percent" 100.0*abs($Ron_sh - $Ron_nosh)/$Ron_nosh
+
+# Threshold voltage shift
+extract name="vt_shift" abs($vt_nosh - $vt_sh)
+
+# Velocity saturation comparison
+extract name="velocity_reduction_percent" 100.0*abs($max_evel_nosh - $max_evel_sh)/$max_evel_nosh
+
+# Device geometry metrics
+extract name="channel_length_nm" $channel_length*1000.0
+extract name="si_film_thickness_nm" $si_film*1000.0
+extract name="BOX_thickness_nm" $BOX_oxide*1000.0
+
+# Temperature metrics
+extract name="temp_rise_kelvin" $delta_temp
+extract name="thermal_resistance_K_per_W" $thermal_resistance
+
+######################################################################
+##############  (6) Visualization and Output  ########################
+######################################################################
+
+# Overlay comparison of output characteristics
+victoryvisual --overlay no_selfheating_IDVD.log with_selfheating_IDVD.log -color1=blue -color2=red
+
+# Overlay comparison of transfer characteristics
+victoryvisual --overlay no_selfheating_transfer.log with_selfheating_transfer.log -color1=blue -color2=red
+
+# Temperature profile visualization
+victoryvisual with_selfheating_highbias.str
+
+# Thermal resistance sweep visualization
+victoryvisual thermal_resistance_sweep.log
+
+quit
+

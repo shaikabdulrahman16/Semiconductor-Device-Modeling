@@ -1,0 +1,286 @@
+# Enhanced SOI MOSFET Transport Model Comparison - Lab 3 Part 2
+# Comprehensive analysis of drift-diffusion vs hydrodynamic transport models
+# Comparing short-channel effects in nanoscale devices
+
+go victorydevice
+
+############################################################
+#############  Device Configuration Parameters  ############
+############################################################
+
+# Global mesh control
+mesh space.mult=1.0
+
+# Device Geometry - Configuration 1 (22nm channel)
+set sd_length_long = 0.0248
+set channel_length_long = 0.0221
+set gate_oxide_long = -0.00102
+set si_film_long = 0.0101
+set BOX_oxide_long = 0.0299
+
+# Device Geometry - Configuration 2 (10nm channel)
+set sd_length_short = 0.025
+set channel_length_short = 0.010
+set gate_oxide_short = -0.0009
+set si_film_short = 0.008
+set BOX_oxide_short = 0.025
+
+# Active configuration selection (use short channel for main simulation)
+set sd_length = $sd_length_short
+set channel_length = $channel_length_short
+set gate_oxide = $gate_oxide_short
+set si_film = $si_film_short
+set BOX_oxide = $BOX_oxide_short
+
+# Doping Concentrations
+set sd_doping_high = 1.02e20
+set sd_doping_low = 1e20
+set sd_doping = $sd_doping_low
+
+set channel_doping_high = 5e18
+set channel_doping_low = 4.98e18
+set channel_doping = $channel_doping_high
+
+# Transport Model Parameters
+set tau_relaxation = 0.2e-12      # Energy relaxation time for hydrodynamic model
+set tau_mobility = 0.2e-12        # Momentum relaxation time
+
+# Voltage Parameters
+set Vmax_high = 1.01
+set Vmax_low = 0.9
+set Vmax = $Vmax_low
+set Vgate_step = 0.01
+set Vdrain_fine_step = 0.001
+set Vdrain_coarse_step = 0.01
+set Vdrain_threshold = 0.01
+
+############################################################
+#############  Enhanced Mesh Generation  ###################
+############################################################
+
+# X-direction mesh with refined channel region
+x.mesh loc=0.00    spac=0.005
+x.mesh loc=$sd_length/2   spac=0.002
+x.mesh loc=$sd_length   spac=0.0001
+x.mesh loc=$sd_length + $channel_length/4   spac=0.0005
+x.mesh loc=$sd_length + $channel_length/2   spac=0.0005
+x.mesh loc=$sd_length + 3*$channel_length/4   spac=0.0005
+x.mesh loc=$sd_length + $channel_length   spac=0.0001
+x.mesh loc=$sd_length + $channel_length + $sd_length/2   spac=0.002
+x.mesh loc=2*$sd_length + $channel_length    spac=0.005
+
+# Y-direction mesh with fine resolution at interfaces
+y.mesh loc=$gate_oxide  spac=0.00005
+y.mesh loc=$gate_oxide/2  spac=0.00008
+y.mesh loc=0.00    spac=0.00005
+y.mesh loc=$si_film/4  spac=0.0005
+y.mesh loc=$si_film/2  spac=0.0008
+y.mesh loc=$si_film    spac=0.001
+y.mesh loc=$si_film + $BOX_oxide/2  spac=0.003
+y.mesh loc=$si_film + $BOX_oxide    spac=0.005
+
+############################################################
+#############  Region and Material Definition  #############
+############################################################
+
+# Top gate oxide
+region num=1 y.max=0 oxide
+
+# Silicon film (active device layer)
+region num=2 y.min=0 y.max=$si_film silicon
+
+# Buried oxide (BOX)
+region num=3 y.min=$si_film oxide
+
+############################################################
+#############  Electrode Definitions  ######################
+############################################################
+
+electrode name=gate   x.min=$sd_length x.max=$sd_length+$channel_length y.min=$gate_oxide y.max=$gate_oxide
+electrode name=source x.max=$sd_length y.min=0 y.max=0
+electrode name=drain  x.min=$sd_length+$channel_length y.min=0 y.max=0
+electrode name=substrate bottom
+
+############################################################
+#############  Doping Profile  #############################
+############################################################
+
+# N+ source region (heavily doped)
+doping uniform conc=$sd_doping n.type x.min=0 x.max=$sd_length y.min=0 y.max=$si_film
+
+# N+ drain region (heavily doped)
+doping uniform conc=$sd_doping n.type x.min=$sd_length+$channel_length y.min=0 y.max=$si_film
+
+# P-type channel region
+doping uniform conc=$channel_doping p.type x.min=$sd_length x.max=$sd_length+$channel_length y.min=0 y.max=$si_film
+
+############################################################
+#############  Contact Configuration  ######################
+############################################################
+
+# Set gate work function
+contact name=gate aluminum
+
+# Save initial structure
+save outfile=soi_enhanced_structure.str
+victoryvisual soi_enhanced_structure.str
+
+######################################################################
+##############  (1) Drift-Diffusion Transport Model  #################
+#  Classical transport model using drift-diffusion equations
+######################################################################
+
+# Physical models for drift-diffusion
+models cvt srh auger fldmob conmob print
+
+# Numerical method
+method newton trap maxtraps=12 climit=1e-5
+
+# Output specifications
+output e.velocity ex.velocity ey.velocity e.field potential charge
+
+# Initialize device
+solve init
+solve prev
+
+# Set initial gate bias
+solve vgate=0 vstep=$Vgate_step name=gate vfinal=$Vmax
+
+# ID-VD characteristics with drift-diffusion model
+log outf=dd_IDVD_complete.log
+solve vdrain=0.0 vstep=$Vdrain_fine_step name=drain vfinal=$Vdrain_threshold
+solve vdrain=$Vdrain_threshold vstep=$Vdrain_coarse_step name=drain vfinal=$Vmax
+save outf=dd_final_state.str
+log off
+
+# Extract parameters from drift-diffusion simulation
+extract init infile="dd_IDVD_complete.log"
+extract name="Id_sat_dd" y.val from curve(v."drain",abs(i."drain")) where x.val=$Vmax
+extract name="gm_dd" max(deriv(curve(v."gate",i."drain")))
+extract name="gds_dd" max(deriv(curve(v."drain",i."drain")))
+extract name="max_evelocity_dd" max(e.velocity)
+
+# Velocity profile extraction at saturation
+solve init
+solve vgate=$Vmax vstep=$Vgate_step name=gate vfinal=$Vmax
+solve vdrain=$Vmax vstep=$Vdrain_coarse_step name=drain vfinal=$Vmax
+log outf=dd_velocity_saturation.log
+save outf=dd_velocity_profile.str
+log off
+
+######################################################################
+##############  (2) Hydrodynamic Transport Model  ####################
+#  Energy balance transport model for hot carrier effects
+######################################################################
+
+# Set energy relaxation parameters for silicon
+material silicon taurel.el=$tau_relaxation taumob.el=$tau_mobility
+
+# Physical models for hydrodynamic transport
+models cvt srh auger fldmob conmob hcte.el print
+
+# Numerical method with tighter convergence
+method newton trap maxtraps=15 climit=1e-6
+
+# Output specifications including carrier temperature
+output e.velocity ex.velocity ey.velocity e.field e.temp potential charge
+
+# Initialize device for hydrodynamic simulation
+solve init
+solve prev
+
+# Set initial gate bias
+solve vgate=0 vstep=$Vgate_step name=gate vfinal=$Vmax
+
+# ID-VD characteristics with hydrodynamic model
+log outf=hydro_IDVD_complete.log
+solve vdrain=0.0 vstep=$Vdrain_fine_step name=drain vfinal=$Vdrain_threshold
+solve vdrain=$Vdrain_threshold vstep=$Vdrain_coarse_step name=drain vfinal=$Vmax
+save outf=hydro_final_state.str
+log off
+
+# Extract parameters from hydrodynamic simulation
+extract init infile="hydro_IDVD_complete.log"
+extract name="Id_sat_hydro" y.val from curve(v."drain",abs(i."drain")) where x.val=$Vmax
+extract name="gm_hydro" max(deriv(curve(v."gate",i."drain")))
+extract name="gds_hydro" max(deriv(curve(v."drain",i."drain")))
+extract name="max_evelocity_hydro" max(e.velocity)
+extract name="max_electron_temp" max(e.temp)
+
+# Velocity profile extraction at saturation
+solve init
+solve vgate=$Vmax vstep=$Vgate_step name=gate vfinal=$Vmax
+solve vdrain=$Vmax vstep=$Vdrain_coarse_step name=drain vfinal=$Vmax
+log outf=hydro_velocity_saturation.log
+save outf=hydro_velocity_profile.str
+log off
+
+######################################################################
+##############  (3) Transfer Characteristics Comparison  #############
+######################################################################
+
+# Drift-diffusion transfer curve
+models cvt srh auger fldmob conmob print
+method newton trap maxtraps=12
+
+solve init
+solve vdrain=$Vmax
+
+log outf=dd_transfer_curve.log
+solve vgate=0.0 vstep=$Vgate_step vfinal=$Vmax name=gate
+save outf=dd_transfer_final.str
+log off
+
+# Extract threshold voltage from drift-diffusion
+extract init infile="dd_transfer_curve.log"
+extract name="vt_dd" xintercept(maxslope(curve(v."gate",i."drain"))) - ave(v."drain")/2.0
+extract name="subvt_dd" 1.0/slope(maxslope(curve(v."gate",log10(i."drain"))))
+
+# Hydrodynamic transfer curve
+material silicon taurel.el=$tau_relaxation taumob.el=$tau_mobility
+models cvt srh auger fldmob conmob hcte.el print
+method newton trap maxtraps=15
+
+solve init
+solve vdrain=$Vmax
+
+log outf=hydro_transfer_curve.log
+solve vgate=0.0 vstep=$Vgate_step vfinal=$Vmax name=gate
+save outf=hydro_transfer_final.str
+log off
+
+# Extract threshold voltage from hydrodynamic
+extract init infile="hydro_transfer_curve.log"
+extract name="vt_hydro" xintercept(maxslope(curve(v."gate",i."drain"))) - ave(v."drain")/2.0
+extract name="subvt_hydro" 1.0/slope(maxslope(curve(v."gate",log10(i."drain"))))
+
+######################################################################
+##############  (4) Comparative Analysis and Metrics  ################
+######################################################################
+
+# Calculate percentage differences between models
+extract name="current_diff_percent" 100.0*abs($Id_sat_dd - $Id_sat_hydro)/$Id_sat_dd
+extract name="velocity_diff_percent" 100.0*abs($max_evelocity_dd - $max_evelocity_hydro)/$max_evelocity_dd
+extract name="vt_diff" abs($vt_dd - $vt_hydro)
+extract name="gm_ratio" $gm_hydro/$gm_dd
+
+# Device performance metrics
+extract name="channel_length_nm" $channel_length*1000.0
+extract name="si_film_thickness_nm" $si_film*1000.0
+extract name="gate_oxide_thickness_nm" abs($gate_oxide)*1000.0
+
+######################################################################
+##############  (5) Visualization and Output  ########################
+######################################################################
+
+# Overlay comparison of drift-diffusion vs hydrodynamic ID-VD curves
+victoryvisual --overlay dd_IDVD_complete.log hydro_IDVD_complete.log -color1=blue -color2=red
+
+# Overlay comparison of transfer characteristics
+victoryvisual --overlay dd_transfer_curve.log hydro_transfer_curve.log -color1=blue -color2=red
+
+# Velocity profile comparison
+victoryvisual --overlay dd_velocity_saturation.log hydro_velocity_saturation.log -color1=blue -color2=red
+
+quit
+

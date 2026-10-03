@@ -1,0 +1,237 @@
+#  Enhanced MOSFET Characterization Script - Lab 3 Part 1
+#  Combined analysis of device performance with multiple configurations
+
+############################################################
+#############  Structure Specification  ####################
+#  Units: distances in um, concentrations in cm^-3
+############################################################
+go victoryd
+
+# Device Configuration Parameters
+# Two gate lengths for comparison: short channel (50nm) and long channel (200nm)
+set Lg_short = 0.050
+set Lg_long = 0.200
+set Lg = $Lg_short        # Active gate length for simulation
+
+# Voltage and Current Parameters
+set V_low = 0.01          # Low drain voltage for linear region
+set V_high = 2.0          # High drain voltage for saturation region
+set V_applied = $V_high   # Applied voltage for transfer curves
+set V_breakdown = 20      # Maximum voltage for breakdown testing
+set I_breakdown = 5e-3    # Breakdown current threshold
+
+# Dimensional Parameters
+set Xs = 0.05             # Source/Drain extension length
+set t_ox = 0.003          # Gate oxide thickness
+set Ysd = 0.01            # Source/Drain junction depth
+set Ybulk = 0.19          # Bulk silicon thickness (adjustable for SOI)
+set Ybox = 0.1            # Buried oxide thickness (for SOI structures)
+
+# Doping Concentrations
+set Nsd = 1e20            # Source/Drain doping
+set Nchannel_low = 1.0e16 # Channel doping - low
+set Nchannel_high = 10e16 # Channel doping - high
+set Nchannel = $Nchannel_low  # Active channel doping
+
+# Output file naming
+set structure_file = nmos_combined.str
+
+############################################################
+#############  Mesh Generation  ############################
+############################################################
+mesh outf=$structure_file
+
+# X-direction mesh - finer near channel edges
+x.m loc = 0               spac = 0.005
+x.m loc = $Xs             spac = 0.003
+x.m loc = $Xs + $Lg/4     spac = 0.002
+x.m loc = $Xs + $Lg/2     spac = 0.002
+x.m loc = $Xs + 3*$Lg/4   spac = 0.002
+x.m loc = $Xs + $Lg       spac = 0.003
+x.m loc = 2*$Xs + $Lg     spac = 0.005
+
+# Y-direction mesh - finer near oxide interface
+y.m loc = -$t_ox          spac = 0.0005
+y.m loc = 0               spac = 0.0005
+y.m loc = $Ysd/2          spac = 0.002
+y.m loc = $Ysd            spac = 0.005
+y.m loc = $Ysd + $Ybulk/2 spac = 0.01
+y.m loc = $Ysd + $Ybulk   spac = 0.01
+
+############################################################
+#############  Region and Electrode Definition  ############
+############################################################
+
+# Define material regions
+region num=1 material=Silicon y.min=0
+region num=2 material=Oxide   y.max=0
+
+# Define electrodes
+electrode name=gate      x.min=$Xs length=$Lg y.min=-$t_ox y.max=-$t_ox    
+electrode name=source    y.min=0 y.max=0  left length=$Xs    
+electrode name=drain     y.min=0 y.max=0  right length=$Xs    
+electrode name=substrate bottom
+
+############################################################
+#############  Doping Profile  #############################
+############################################################
+
+# P-type channel region under gate
+doping uniform conc=$Nchannel p.type x.min=$Xs x.max=$Xs+$Lg y.min=0 y.max=$Ysd
+
+# P-type bulk region
+doping uniform conc=$Nchannel p.type x.min=0 x.max=2*$Xs+$Lg y.min=$Ysd y.max=$Ysd+$Ybulk
+
+# N+ source region
+doping uniform conc=$Nsd n.type x.min=0 x.max=$Xs y.min=0  y.max=$Ysd 
+
+# N+ drain region
+doping uniform conc=$Nsd n.type x.min=$Xs+$Lg x.max=2*$Xs+$Lg y.min=0  y.max=$Ysd 
+
+# Save structure
+save outf=$structure_file
+
+######################################################################
+##############     Transfer Characteristics (Low VDS)  ###############
+#  Objective: Extract threshold voltage, subthreshold slope, and DIBL
+######################################################################
+
+go victoryd
+mesh inf=$structure_file
+
+contact name=gate n.poly
+
+# Physical models
+models cvt srh print auger fldmob conmob  
+
+# Numerical methods
+method newton gummel trap maxtrap=10
+output con.band val.band flowlines charge
+
+# Initialize device
+solve init
+solve vdrain=0.002
+solve vdrain=0.005
+solve vdrain=$V_low
+
+# Transfer curve at low VDS (DIBL reference point)
+log outf=IdVg_lowVds.log
+solve vgate=0.0 vfinal=$V_applied vstep=0.05 name=gate
+
+# Extract parameters at low VDS
+extract init infile="IdVg_lowVds.log"
+extract name="vt_low" xintercept(maxslope(curve(v."gate",i."drain"))) - ave(v."drain")/2.0
+extract name="subvt_low" 1.0/slope(maxslope(curve(v."gate",log10(i."drain"))))
+extract name="vg_at_1e-8_low" x.val from curve(v."gate",i."drain") where y.val=1e-8
+extract name="Ion_low" y.val from curve(v."gate",abs(i."drain")) where x.val=$vt_low+$V_applied
+extract name="Ioff_low" y.val from curve(v."gate",abs(i."drain")) where x.val=0.0
+
+log off
+save outf=nmos_low_vds.str
+
+######################################################################
+##############     Transfer Characteristics (High VDS)  ##############
+######################################################################
+
+# Reset and ramp to high VDS
+solve init
+solve prev
+solve vdrain=0 vstep=0.05 vfinal=$V_applied name=drain
+
+# Transfer curve at high VDS (DIBL measurement point)
+log outf=IdVg_highVds.log
+solve vgate=0.0 vfinal=$V_applied vstep=0.05 name=gate
+
+# Extract parameters at high VDS
+extract init infile="IdVg_highVds.log"
+extract name="vt_high" xintercept(maxslope(curve(v."gate",i."drain"))) - ave(v."drain")/2.0
+extract name="subvt_high" 1.0/slope(maxslope(curve(v."gate",log10(i."drain"))))
+extract name="vg_at_1e-8_high" x.val from curve(v."gate",i."drain") where y.val=1e-8
+extract name="Ion_high" y.val from curve(v."gate",abs(i."drain")) where x.val=$vt_high+$V_applied
+extract name="Ioff_high" y.val from curve(v."gate",abs(i."drain")) where x.val=0.0
+
+# Calculate DIBL (Drain-Induced Barrier Lowering)
+extract name="DIBL" abs($vg_at_1e-8_low - $vg_at_1e-8_high)/($V_applied - $V_low)
+extract name="vt_shift" abs($vt_low - $vt_high)
+
+# Calculate Ion/Ioff ratios
+extract name="Ion_Ioff_low" $Ion_low/$Ioff_low
+extract name="Ion_Ioff_high" $Ion_high/$Ioff_high
+
+log off
+save outf=nmos_high_vds.str
+
+######################################################################
+##############     Output Characteristics (Multiple VG)  #############
+######################################################################
+
+# Reset device
+solve init
+solve vdrain=$V_low
+solve vgate=$vt_high
+
+log outf=IdVd_output.log
+
+# Sweep VD at Vth
+solve vgate=$vt_high
+solve vdrain=0 vfinal=$V_applied vstep=0.05 name=drain
+
+# Sweep VD at Vth + 0.3V
+solve vgate=$vt_high+0.3
+solve vdrain=0 vfinal=$V_applied vstep=0.05 name=drain
+
+# Sweep VD at Vth + 0.6V
+solve vgate=$vt_high+0.6
+solve vdrain=0 vfinal=$V_applied vstep=0.05 name=drain
+
+# Sweep VD at Vth + 0.9V
+solve vgate=$vt_high+0.9
+solve vdrain=0 vfinal=$V_applied vstep=0.05 name=drain
+
+# Sweep VD at Vth + 1.2V
+solve vgate=$vt_high+1.2
+solve vdrain=0 vfinal=$V_applied vstep=0.05 name=drain
+
+log off
+save outf=nmos_output.str
+
+######################################################################
+##############      Impact Ionization and Breakdown  #################
+#  Using Selberherr's impact ionization model
+######################################################################
+
+impact selb
+method trap maxtraps=15 climit=1e-5
+
+# Initialize for breakdown testing
+solve init
+solve prev
+
+log outf=IdVd_breakdown.log
+
+# Sweep drain voltage to breakdown at Vth
+solve vgate=$vt_high
+solve vdrain=0 vstep=0.1 vfinal=$V_breakdown name=drain
+
+# Extract breakdown voltage
+extract init infile="IdVd_breakdown.log"
+extract name="bvds" x.val from curve(abs(v."drain"),abs(i."drain")) where y.val=$I_breakdown
+
+# Calculate maximum electric field at breakdown
+extract name="max_efield" max(abs(e."field"))
+
+log off
+save outf=nmos_breakdown.str
+
+######################################################################
+##############      Summary Extraction  ##############################
+######################################################################
+
+# Print summary of key parameters
+extract name="channel_length" $Lg
+extract name="oxide_thickness" $t_ox
+extract name="channel_doping" $Nchannel
+extract name="vt_nominal" ($vt_low + $vt_high)/2.0
+
+quit
+
